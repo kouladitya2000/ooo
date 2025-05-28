@@ -1,0 +1,42 @@
+param (
+    [Parameter(Mandatory = $true)]
+    [string]$subscriptionName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$functionAppName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$resourceGroupName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$functionKey  # Shared admin key
+)
+
+BeforeAll {
+    az account set --subscription $subscriptionName
+}
+
+Describe "Validate /admin/functions/<function> endpoint returns 200 OK" {
+
+    # Fetch all function definitions from the function app
+    $functions = az functionapp function list `
+        --name $functionAppName `
+        --resource-group $resourceGroupName `
+        | ConvertFrom-Json
+
+    foreach ($fn in $functions) {
+        # Use the function name directly from properties without splitting
+        $functionName = $fn.properties.name
+
+        It "Function '$functionName' returns 200 OK from admin endpoint" {
+            $url = "https://$functionAppName.azurewebsites.net/admin/functions/$functionName"
+            $headers = @{
+                'Content-Type'    = 'application/json'
+                'x-functions-key' = $functionKey
+            }
+
+            $response = Invoke-WebRequest -Uri $url -Headers $headers -Method Get -UseBasicParsing
+            $response.StatusCode | Should -Be 200
+        }
+    }
+}

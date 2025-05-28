@@ -1,0 +1,85 @@
+param (
+    [Parameter(Mandatory = $true)]
+    [string]$subscriptionName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$functionAppName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$appServicePlanName
+)
+
+Write-Host "Running Function App Pester Tests for subscription: $subscriptionName"
+
+BeforeAll {
+    az account set --subscription $subscriptionName
+}
+
+Describe "Validate Azure Function App Resources" {
+
+    It "Check App Service Plan Exists" {
+        $plan = az appservice plan list --query "[?name=='$appServicePlanName']" | ConvertFrom-Json
+        $plan.Count | Should -BeGreaterThan 0
+    }
+
+    It "Check Function App Exists" {
+        $func = az functionapp list --query "[?name=='$functionAppName']" | ConvertFrom-Json
+        $func.Count | Should -BeGreaterThan 0
+    }
+
+    It "Function App is Running" {
+        $status = az functionapp show --name $functionAppName --query "state" -o tsv
+        $status | Should -Be "Running"
+    }
+
+    It "Check Zip Deployment is Successful" {
+        $deployment = az functionapp deployment list-publishing-profiles --name $functionAppName --output json | ConvertFrom-Json
+        $deployment | Should -Not -BeNullOrEmpty
+    }
+
+    It "Check App Settings Exist" {
+        $settings = az functionapp config appsettings list --name $functionAppName | ConvertFrom-Json
+        $settings.Count | Should -BeGreaterThan 0
+    }
+
+    It "Check Timer Trigger Function Exists" {
+        $functions = az functionapp function list --name $functionAppName | ConvertFrom-Json
+        ($functions.name -like "*TimerTrigger*") | Should -BeTrue
+    }
+
+    It "Function App has SCM (Kudu) Site Configured" {
+        $scmUri = az functionapp deployment list-publishing-profiles --name $functionAppName --query "[?publishMethod=='MSDeploy'].scmUri" -o tsv
+        $scmUri | Should -Match "https://$functionAppName.scm"
+    }
+
+    It "Check HTTP Trigger returns 200 OK without invocation (Health Probe)" {
+        $url = "https://$functionAppName.azurewebsites.net/api/healthcheck"
+        try {
+            $response = Invoke-WebRequest -Uri $url -Method Get -UseBasicParsing
+            $response.StatusCode | Should -Be 200
+        } catch {
+            $_.Exception.Message | Should -BeNullOrEmpty  # Fail test with the error
+        }
+    }
+
+    It "Check Timer Function is Enabled" {
+        $functions = az functionapp function list --name $functionAppName | ConvertFrom-Json
+        $timerFunction = $functions | Where-Object { $_.name -like "*TimerTrigger*" }
+        $timerFunction.config.disabled | Should -BeFalse
+    }
+
+    It "Function App Has Correct Runtime Stack" {
+        $config = az functionapp config show --name $functionAppName | ConvertFrom-Json
+        $config.linuxFxVersion | Should -Match "dotnet|node|python"  # Modify to your actual runtime
+    }
+
+    It "Function App Has Correct Always On Setting" {
+        $config = az functionapp config show --name $functionAppName | ConvertFrom-Json
+        $config.alwaysOn | Should -BeTrue
+    }
+
+    It "Function App Has Deployment Source Set to Zip" {
+        $source = az functionapp deployment source show --name $functionAppName | ConvertFrom-Json
+        $source.repoUrl | Should -BeNullOrEmpty
+    }
+}

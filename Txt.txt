@@ -1,0 +1,61 @@
+param (
+    [Parameter(Mandatory = $true)]
+    [string]$subscriptionName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$functionAppName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$appServicePlanName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$resourceGroupName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$functionKey  # Shared admin key
+)
+
+BeforeAll {
+    az account set --subscription $subscriptionName
+}
+
+Describe "Azure Function App Deployment Validation" {
+
+    It "App Service Plan Exists" {
+        $plan = az appservice plan show --name $appServicePlanName --resource-group $resourceGroupName --query "name" -o tsv
+        $plan | Should -Be $appServicePlanName
+    }
+
+    It "Function App Exists" {
+        $app = az functionapp show --name $functionAppName --resource-group $resourceGroupName --query "name" -o tsv
+        $app | Should -Be $functionAppName
+    }
+
+    It "Function App is Running" {
+        $state = az functionapp show --name $functionAppName --resource-group $resourceGroupName --query "state" -o tsv
+        $state | Should -Be "Running"
+    }
+
+    It "Function App Has At Least One Function Deployed" {
+        $functions = az functionapp function list --name $functionAppName --resource-group $resourceGroupName | ConvertFrom-Json
+        $functions.Count | Should -BeGreaterThan 0
+    }
+
+    Context "Manual Trigger of All Functions via Admin Endpoint" {
+        $functions = az functionapp function list --name $functionAppName --resource-group $resourceGroupName | ConvertFrom-Json
+
+        foreach ($fn in $functions) {
+            $functionName = $fn.properties.name
+            It "Function '$functionName' returns 200 OK on admin trigger" {
+                $url = "https://$functionAppName.azurewebsites.net/admin/functions/$functionName"
+                $headers = @{
+                    'Content-Type'    = 'application/json'
+                    'x-functions-key' = $functionKey
+                }
+
+                $response = Invoke-WebRequest -Uri $url -Headers $headers -Method Get -UseBasicParsing
+                $response.StatusCode | Should -Be 200
+            }
+        }
+    }
+}

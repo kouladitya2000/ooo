@@ -1,0 +1,25 @@
+inlineScript: |
+  $functionAppName = "${env:FUNCTIONAPP_NAME}"
+  $resourceGroupName = "autopowershellfa-eun-np-01"
+  $subscriptionName = "delulu-multi-cstmg-nonprod-01"
+
+  # Dynamically fetch the function key using Azure CLI
+  $functionKey = az functionapp keys list `
+      --name $functionAppName `
+      --resource-group $resourceGroupName `
+      --query "functionKeys.default" `
+      --output tsv
+
+  $pesterContainer = New-PesterContainer -Path "$(Build.SourcesDirectory)/test/functionAppTest.ps1"
+
+  $results = Invoke-Pester -Container $pesterContainer `
+    -Data @{ 
+      subscriptionName    = $subscriptionName;
+      functionAppName     = $functionAppName;
+      appServicePlanName  = $functionAppName;
+      functionKey         = $functionKey;
+      resourceGroupName   = $resourceGroupName
+    } `
+    -Output Detailed -PassThru
+
+  $results | Export-NUnitReport -Path "$Build.SourcesDirectory/test/FunctionAppTest.xml"
